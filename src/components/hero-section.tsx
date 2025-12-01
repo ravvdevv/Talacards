@@ -1,10 +1,9 @@
-import React, { useState } from "react"
-import { Zap } from "lucide-react"
+import { useState } from "react"
 import PdfParser from "@/components/pdf-parser"
 import FlashcardDisplayArea from "@/components/flashcard-display-area"
 
 export default function Hero() {
-  const [extractedPdfText, setExtractedPdfText] = useState('');
+  const [, setExtractedPdfText] = useState('');
   const [flashcardText, setFlashcardText] = useState('');
 
   return (
@@ -29,10 +28,9 @@ export default function Hero() {
         </div>
 
         {/* Right Column: Flashcard Display */}
-        <div className="w-full lg:w-3/5 flex justify-center items-stretch min-h-[400px]">
-          <FlashcardDisplayArea text={flashcardText} />
-        </div>
-      </div>
+        <div className="w-full lg:w-3/5 flex justify-center items-stretch min-h-[500px]">
+              <FlashcardDisplayArea text={flashcardText} />
+            </div>      </div>
     </div>
   )
 }

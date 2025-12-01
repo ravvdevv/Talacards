@@ -1,11 +1,20 @@
-
 export interface Flashcard {
   id: string;
   question: string;
   answer: string;
 }
 
-export const generateFlashcards = async (text: string): Promise<Flashcard[]> => {
+export const generateFlashcards = async (text: string): Promise<{ flashcards: Flashcard[]; warningMessage: string | null }> => {
+  const MAX_CHARS = 7000;
+  let processedText = text;
+  let warningMessage: string | null = null;
+
+  if (text.length > MAX_CHARS) {
+    processedText = text.substring(0, MAX_CHARS) + "\n\n... (content truncated due to character limit)";
+    warningMessage = `Your input text was too long (${text.length} characters) and has been truncated to ${MAX_CHARS} characters. Some content might be missing.`;
+    console.warn(`Input text truncated from ${text.length} to ${MAX_CHARS} characters.`);
+  }
+
   const payload = {
     model: "openai",
     messages: [
@@ -33,7 +42,7 @@ export const generateFlashcards = async (text: string): Promise<Flashcard[]> => 
       },
       {
         role: "user",
-        content: `Create flashcards from the following text:\n\n${text}\n\nOnly proceed if the content is a valid academic lesson. Otherwise, respond with the 'invalid-input' format as instructed.`,
+        content: `Create flashcards from the following text:\n\n${processedText}\n\nOnly proceed if the content is a valid academic lesson. Otherwise, respond with the 'invalid-input' format as instructed.`,
       },
     ],
     max_tokens: 1000,
@@ -54,36 +63,127 @@ export const generateFlashcards = async (text: string): Promise<Flashcard[]> => 
     if (!response.ok) {
       const errorData = await response.json();
       console.error("AI API Error:", errorData);
-      throw new Error(`AI API error: ${response.status} ${response.statusText}`);
+      const error = new Error(`AI API error: ${response.status} ${response.statusText}`) as any;
+      error.status = response.status;
+      throw error;
     }
 
     const data = await response.json();
     const aiResponseContent = data?.choices?.[0]?.message?.content;
 
-    if (aiResponseContent) {
-      try {
-        const parsedResponse = JSON.parse(aiResponseContent);
+            if (aiResponseContent) {
 
-        if (Array.isArray(parsedResponse) && parsedResponse[0]?.flashcardId === 'invalid-input') {
-          const reason = parsedResponse[0]?.name || "The provided content is not a valid academic lesson.";
-          throw new Error(reason);
-        }
+              try {
 
-        const flashcards: { question: string; answer: string }[] = parsedResponse;
-        return flashcards.map((card, index) => ({
-          id: `flashcard-${index}`,
-          question: card.question,
-          answer: card.answer,
-        }));
-      } catch (parseError) {
-        console.error("Failed to parse AI response content as JSON:", aiResponseContent, parseError);
-        throw new Error("Failed to parse flashcards: The AI response was too long or malformed. Please try with a shorter text or different content.");
-      }
-    } else {
-      throw new Error("No content received from AI for flashcards.");
-    }
+                // Attempt to extract JSON from the AI response, as it might be wrapped in markdown or other text
+
+                const jsonMatch = aiResponseContent.match(/```json\n([\s\S]*?)\n```/);
+
+                let jsonString = aiResponseContent;
+
+        
+
+                if (jsonMatch && jsonMatch[1]) {
+
+                  jsonString = jsonMatch[1];
+
+                } else {
+
+                  // Fallback to trying to find the first array or object if no markdown block
+
+                  const arrayMatch = aiResponseContent.match(/[\[][\s\S]*?[\]]/);
+
+                  const objectMatch = aiResponseContent.match(/[\[][\s\S]*?[\]]/);
+
+        
+
+                  if (arrayMatch && (!objectMatch || arrayMatch.index < objectMatch.index)) {
+
+                    jsonString = arrayMatch[0];
+
+                  } else if (objectMatch) {
+
+                    jsonString = objectMatch[0];
+
+                  }
+
+                }
+
+                
+
+                const parsedResponse = JSON.parse(jsonString);
+
+        
+
+                if (Array.isArray(parsedResponse) && parsedResponse[0]?.flashcardId === 'invalid-input') {
+
+                  const reason = parsedResponse[0]?.name || "The provided content is not a valid academic lesson.";
+
+                  throw new Error(reason);
+
+                }
+
+        
+
+                const flashcards: { question: string; answer: string }[] = parsedResponse;
+
+                return {
+
+                  flashcards: flashcards.map((card, index) => ({
+
+                    id: `flashcard-${index}`,
+
+                    question: card.question,
+
+                    answer: card.answer,
+
+                  })),
+
+                  warningMessage,
+
+                };
+
+              } catch (parseError) {
+
+                console.error("Failed to parse AI response content as JSON:", aiResponseContent, parseError);
+
+                throw new Error("Failed to parse flashcards: The AI response was not valid JSON. Please try with a different text or contact support if the issue persists.");
+
+              }
+
+            } else {
+
+              throw new Error("No content received from AI for flashcards.");
+
+            }
+
+        
   } catch (error) {
     console.error("Error generating flashcards:", error);
     throw error; // Re-throw the error to be caught by the calling component
   }
+};
+
+const LOCAL_STORAGE_KEY = 'talacards-flashcards';
+
+export const saveFlashcardsToLocalStorage = (flashcards: Flashcard[]): void => {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(flashcards));
+    console.log('Flashcards saved to local storage.');
+  } catch (error) {
+    console.error('Failed to save flashcards to local storage:', error);
+  }
+};
+
+export const loadFlashcardsFromLocalStorage = (): Flashcard[] => {
+  try {
+    const storedFlashcards = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (storedFlashcards) {
+      console.log('Flashcards loaded from local storage.');
+      return JSON.parse(storedFlashcards) as Flashcard[];
+    }
+  } catch (error) {
+    console.error('Failed to load flashcards from local storage:', error);
+  }
+  return [];
 };

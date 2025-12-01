@@ -53,8 +53,8 @@ const StudyMode: React.FC<StudyModeProps> = ({ flashcards }) => {
   const card = flashcards[currentIndex];
 
   return (
-    <Card className="w-full max-w-md mx-auto p-6 flex flex-col items-center justify-between min-h-[350px] shadow-lg">
-      <CardContent className="flex-grow flex items-center justify-center p-0">
+    <Card className="w-full max-w-[540px] mx-auto p-6 flex flex-col items-center justify-between min-h-[450px] shadow-lg">
+      <CardContent className="flex-grow flex items-center justify-center">
         <Flashcard flashcard={card} />
       </CardContent>
 
