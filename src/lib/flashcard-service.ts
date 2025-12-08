@@ -14,6 +14,28 @@ export interface Flashcard {
   answer: string;
 }
 
+/**
+ * Extracts JSON content from AI response that might be wrapped in markdown or other text
+ */
+const extractJsonFromResponse = (content: string): string => {
+  // Try to extract JSON from markdown code block
+  const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/);
+  
+  if (jsonMatch && jsonMatch[1]) {
+    return jsonMatch[1];
+  }
+  
+  // Fallback to trying to find the first array if no markdown block
+  const arrayMatch = content.match(/[\[][\s\S]*?[\]]/);
+  
+  if (arrayMatch) {
+    return arrayMatch[0];
+  }
+  
+  // Return original content if no patterns match
+  return content;
+};
+
 export const generateFlashcards = async (text: string): Promise<{ flashcards: Flashcard[]; warningMessage: string | null }> => {
   let processedText = text;
   let warningMessage: string | null = null;
@@ -62,87 +84,33 @@ export const generateFlashcards = async (text: string): Promise<{ flashcards: Fl
     const data = await response.json();
     const aiResponseContent = data?.choices?.[0]?.message?.content;
 
-            if (aiResponseContent) {
+    if (aiResponseContent) {
+      try {
+        const jsonString = extractJsonFromResponse(aiResponseContent);
+        const parsedResponse = JSON.parse(jsonString);
 
-              try {
+        if (Array.isArray(parsedResponse) && parsedResponse[0]?.flashcardId === 'invalid-input') {
+          const reason = parsedResponse[0]?.name || "The provided content is not a valid academic lesson.";
+          throw new Error(reason);
+        }
 
-                // Attempt to extract JSON from the AI response, as it might be wrapped in markdown or other text
+        const flashcards: { question: string; answer: string }[] = parsedResponse;
 
-                const jsonMatch = aiResponseContent.match(/```json\n([\s\S]*?)\n```/);
-
-                let jsonString = aiResponseContent;
-
-        
-
-                if (jsonMatch && jsonMatch[1]) {
-
-                  jsonString = jsonMatch[1];
-
-                } else {
-
-                  // Fallback to trying to find the first array if no markdown block
-
-                  const arrayMatch = aiResponseContent.match(/[\[][\s\S]*?[\]]/);
-
-        
-
-                  if (arrayMatch) {
-
-                    jsonString = arrayMatch[0];
-
-                  }
-
-                }
-
-                
-
-                const parsedResponse = JSON.parse(jsonString);
-
-        
-
-                if (Array.isArray(parsedResponse) && parsedResponse[0]?.flashcardId === 'invalid-input') {
-
-                  const reason = parsedResponse[0]?.name || "The provided content is not a valid academic lesson.";
-
-                  throw new Error(reason);
-
-                }
-
-        
-
-                const flashcards: { question: string; answer: string }[] = parsedResponse;
-
-                return {
-
-                  flashcards: flashcards.map((card, index) => ({
-
-                    id: `flashcard-${index}`,
-
-                    question: card.question,
-
-                    answer: card.answer,
-
-                  })),
-
-                  warningMessage,
-
-                };
-
-              } catch (parseError) {
-
-                console.error("Failed to parse AI response content as JSON:", aiResponseContent, parseError);
-
-                throw new Error(ERROR_MESSAGES.INVALID_JSON);
-
-              }
-
-            } else {
-
-              throw new Error(ERROR_MESSAGES.NO_CONTENT);
-
-            }
-
-        
+        return {
+          flashcards: flashcards.map((card, index) => ({
+            id: `flashcard-${index}`,
+            question: card.question,
+            answer: card.answer,
+          })),
+          warningMessage,
+        };
+      } catch (parseError) {
+        console.error("Failed to parse AI response content as JSON:", aiResponseContent, parseError);
+        throw new Error(ERROR_MESSAGES.INVALID_JSON);
+      }
+    } else {
+      throw new Error(ERROR_MESSAGES.NO_CONTENT);
+    }
   } catch (error) {
     console.error("Error generating flashcards:", error);
     throw error; // Re-throw the error to be caught by the calling component
