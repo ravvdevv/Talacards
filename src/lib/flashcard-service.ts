@@ -26,7 +26,7 @@ const extractJsonFromResponse = (content: string): string => {
   }
   
   // Fallback to trying to find the first array if no markdown block
-  const arrayMatch = content.match(/[\[][\s\S]*?[\]]/);
+  const arrayMatch = content.match(/\[[\s\S]*?\]/);
   
   if (arrayMatch) {
     return arrayMatch[0];
