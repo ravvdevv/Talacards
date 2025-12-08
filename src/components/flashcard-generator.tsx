@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { generateFlashcards, type Flashcard } from '@/lib/flashcard-service';
+import { ERROR_MESSAGES, DEBOUNCE_DELAY_MS } from '@/lib/constants';
+import { downloadFlashcardsAsTxt, downloadFlashcardsAsPdf } from '@/lib/download-utils';
 import StudyMode from './study-mode';
 import { Button } from '@/components/ui/button';
 import { Loader2, RefreshCw, AlertCircle, Sparkles,  Download } from 'lucide-react';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 interface FlashcardGeneratorProps {
@@ -18,6 +18,33 @@ const FlashcardGenerator: React.FC<FlashcardGeneratorProps> = ({ text }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const pdfContentRef = useRef<HTMLDivElement>(null);
+
+  // Common error handling logic
+  const handleGenerateError = (err: Error & { status?: number }) => {
+    if (err.status === 500) {
+      setError(ERROR_MESSAGES.PDF_TOO_LARGE);
+    } else {
+      setError(err.message || ERROR_MESSAGES.GENERATION_FAILED);
+    }
+    console.error(err);
+  };
+
+  // Common flashcard generation logic
+  const generateAndSetFlashcards = async () => {
+    setError(null);
+    setWarningMessage(null);
+    
+    try {
+      const { flashcards: generatedFlashcards, warningMessage: receivedWarning } = await generateFlashcards(text);
+      setFlashcards(generatedFlashcards);
+      if (receivedWarning) {
+        setWarningMessage(receivedWarning);
+      }
+    } catch (err) {
+      handleGenerateError(err as Error & { status?: number });
+      throw err;
+    }
+  };
       
       // Auto-generate flashcards when text changes
       useEffect(() => {
@@ -28,120 +55,52 @@ const FlashcardGenerator: React.FC<FlashcardGeneratorProps> = ({ text }) => {
             return;
           }
           setIsGenerating(true);
-      setError(null);
-      setWarningMessage(null); // Clear previous warnings
-  
-      try {
-        const { flashcards: generatedFlashcards, warningMessage: receivedWarning } = await generateFlashcards(text);
-        setFlashcards(generatedFlashcards);
-        if (receivedWarning) {
-          setWarningMessage(receivedWarning);
-        }
-              } catch (err: any) {
-                if (err.status === 500) {
-                  setError("Your PDF file was too large for the AI to process. Please try with a smaller file or extract relevant sections.");
-                } else {
-                  setError(err.message || "Failed to generate flashcards. Please try again.");
-                }
-                console.error(err);
-              } finally {
-                setIsGenerating(false);
-              }    };
+      
+          try {
+            await generateAndSetFlashcards();
+          } catch {
+            // Error already handled in generateAndSetFlashcards
+          } finally {
+            setIsGenerating(false);
+          }
+        };
   
     // Add a small delay to prevent too many rapid generations
     const timer = setTimeout(() => {
       generate();
-    }, 500);
+    }, DEBOUNCE_DELAY_MS);
   
     return () => clearTimeout(timer);
   }, [text]);
   
   const handleRegenerate = async () => {
     setIsLoading(true);
-    setError(null);
-    setWarningMessage(null); // Clear previous warnings
   
     try {
-      const { flashcards: generatedFlashcards, warningMessage: receivedWarning } = await generateFlashcards(text);
-      setFlashcards(generatedFlashcards);
-      if (receivedWarning) {
-        setWarningMessage(receivedWarning);
-      }
-            } catch (err: any) {
-              if (err.status === 500) {
-                setError("Your PDF file was too large for the AI to process. Please try with a smaller file or extract relevant sections.");
-              } else {
-                setError(err.message || "Failed to regenerate flashcards. Please try again.");
-              }
-              console.error(err);
-            } finally {
-              setIsLoading(false);
-            }  };
+      await generateAndSetFlashcards();
+    } catch {
+      // Error already handled in generateAndSetFlashcards
+    } finally {
+      setIsLoading(false);
+    }
+  };
     
-                // TXT Download Function
-                const handleDownloadTxt = () => {
-                  const textContent = flashcards.map((card, index) => 
-                    `${index + 1}. Question: ${card.question}\n   Answer: ${card.answer}`
-                  ).join('\n\n');
-                
-                  const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
-                  const link = document.createElement('a');
-                  link.href = URL.createObjectURL(blob);
-                  link.download = 'flashcards.txt';
-                  document.body.appendChild(link);
-                  link.click();
-                  document.body.removeChild(link);
-                  URL.revokeObjectURL(link.href); // Clean up
-                };
-            
-                // PDF Download Function
-                const handleDownloadPdf = async () => {
-                  if (!pdfContentRef.current) return;
-                
-                  // Temporarily populate the hidden ref with flashcard content for rendering
-                  pdfContentRef.current.innerHTML = flashcards.map(flashcard => `
-                    <div style="width: 300px; border: 1px solid #e0e0e0; padding: 15px; margin-bottom: 20px; background-color: #f9f9f9; border-radius: 8px;">
-                      <h4 style="font-weight: bold; margin-bottom: 8px; font-size: 1.1em; color: #333;">Question:</h4>
-                      <p style="margin-bottom: 15px; font-size: 1em; color: #555;">${flashcard.question}</p>
-                      <h4 style="font-weight: bold; margin-top: 15px; margin-bottom: 8px; font-size: 1.1em; color: #333;">Answer:</h4>
-                      <p style="font-size: 1em; color: #555;">${flashcard.answer}</p>
-                    </div>
-                  `).join('');
-                
-                  try {
-                    const canvas = await html2canvas(pdfContentRef.current, { scale: 2 }); // Higher scale for better quality
-                    const imgData = canvas.toDataURL('image/png');
-                
-                    const doc = new jsPDF({
-                      unit: "pt",
-                      format: "letter",
-                      orientation: "portrait",
-                    });
-                
-                    const margin = 20;
-                    let imgWidth = doc.internal.pageSize.width - 2 * margin;
-                    let imgHeight = (canvas.height * imgWidth) / canvas.width;
-                    let y = margin;
-                
-                    if (imgHeight > doc.internal.pageSize.height - 2 * margin) { // If content exceeds one page
-                      const ratio = (doc.internal.pageSize.height - 2 * margin) / imgHeight;
-                      imgHeight = doc.internal.pageSize.height - 2 * margin;
-                      imgWidth = imgWidth * ratio;
-                    }
-                
-                    doc.addImage(imgData, 'PNG', margin, y, imgWidth, imgHeight);
-                
-                    doc.save('flashcards.pdf');
-                  } catch (error) {
-                    console.error("Error generating PDF:", error);
-                    // Optionally, show an alert to the user
-                    setWarningMessage("Failed to generate PDF. Please try again.");
-                  } finally {
-                    // Clear the hidden ref content
-                    pdfContentRef.current.innerHTML = '';
-                  }
-                };    
-    return (
+  // TXT Download Function
+  const handleDownloadTxt = () => {
+    downloadFlashcardsAsTxt(flashcards);
+  };
+
+  // PDF Download Function
+  const handleDownloadPdf = async () => {
+    try {
+      await downloadFlashcardsAsPdf(flashcards, pdfContentRef);
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      setWarningMessage(ERROR_MESSAGES.PDF_GENERATION_ERROR);
+    }
+  };
+  
+  return (
     <div className="w-full h-full flex flex-col">
       <div ref={pdfContentRef} style={{ 
         position: 'absolute', 

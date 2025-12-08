@@ -1,55 +1,68 @@
+import {
+  MAX_INPUT_CHARS,
+  AI_API_URL,
+  AI_MODEL,
+  MAX_TOKENS,
+  LOCAL_STORAGE_KEY,
+  ERROR_MESSAGES,
+  FLASHCARD_SYSTEM_PROMPT,
+} from './constants';
+
 export interface Flashcard {
   id: string;
   question: string;
   answer: string;
 }
 
+/**
+ * Extracts JSON content from AI response that might be wrapped in markdown or other text
+ */
+const extractJsonFromResponse = (content: string): string => {
+  // Try to extract JSON from markdown code block
+  const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/);
+  
+  if (jsonMatch && jsonMatch[1]) {
+    return jsonMatch[1];
+  }
+  
+  // Fallback to trying to find the first array if no markdown block
+  const arrayMatch = content.match(/\[[\s\S]*?\]/);
+  
+  if (arrayMatch) {
+    return arrayMatch[0];
+  }
+  
+  // Return original content if no patterns match
+  return content;
+};
+
 export const generateFlashcards = async (text: string): Promise<{ flashcards: Flashcard[]; warningMessage: string | null }> => {
-  const MAX_CHARS = 7000;
   let processedText = text;
   let warningMessage: string | null = null;
 
-  if (text.length > MAX_CHARS) {
-    processedText = text.substring(0, MAX_CHARS) + "\n\n... (content truncated due to character limit)";
-    warningMessage = `Your input text was too long (${text.length} characters) and has been truncated to ${MAX_CHARS} characters. Some content might be missing.`;
-    console.warn(`Input text truncated from ${text.length} to ${MAX_CHARS} characters.`);
+  if (text.length > MAX_INPUT_CHARS) {
+    processedText = text.substring(0, MAX_INPUT_CHARS) + "\n\n... (content truncated due to character limit)";
+    warningMessage = `Your input text was too long (${text.length} characters) and has been truncated to ${MAX_INPUT_CHARS} characters. Some content might be missing.`;
+    console.warn(`Input text truncated from ${text.length} to ${MAX_INPUT_CHARS} characters.`);
   }
 
   const payload = {
-    model: "openai",
+    model: AI_MODEL,
     messages: [
       {
         role: "system",
-        content: `You are an AI learning assistant that creates effective flashcards to help students study and retain information.
-
-  Before generating flashcards, first verify that the provided content is a valid academic lesson typically found in school or university curricula (e.g., mathematics, biology, history, computer science, etc.).
-
-  If the extracted content is **not related to any academic subject** or **not suitable for educational flashcards** (e.g., personal stories, random internet text, opinions, fictional content), respond with:
-  [{
-    name: {reason why it's not valid},
-    flashcardId: 'invalid-input',
-    cards: []
-  }]
-
-  If valid, your task is to extract key concepts, terms, and facts from the academic content and create a maximum of 25 flashcards in simple Q&A format for active recall.
-
-  Each flashcard should:
-  - Focus on one clear concept
-  - Use simple and direct language
-  - Be useful for review and retention
-
-  Do not include explanations, summaries, or notes outside the flashcard format.`
+        content: FLASHCARD_SYSTEM_PROMPT
       },
       {
         role: "user",
         content: `Create flashcards from the following text:\n\n${processedText}\n\nOnly proceed if the content is a valid academic lesson. Otherwise, respond with the 'invalid-input' format as instructed.`,
       },
     ],
-    max_tokens: 1000,
+    max_tokens: MAX_TOKENS,
   };
 
   try {
-    const response = await fetch("https://text.pollinations.ai/openai", {
+    const response = await fetch(AI_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -63,7 +76,7 @@ export const generateFlashcards = async (text: string): Promise<{ flashcards: Fl
     if (!response.ok) {
       const errorData = await response.json();
       console.error("AI API Error:", errorData);
-      const error = new Error(`AI API error: ${response.status} ${response.statusText}`) as any;
+      const error = new Error(`AI API error: ${response.status} ${response.statusText}`) as Error & { status: number };
       error.status = response.status;
       throw error;
     }
@@ -71,100 +84,38 @@ export const generateFlashcards = async (text: string): Promise<{ flashcards: Fl
     const data = await response.json();
     const aiResponseContent = data?.choices?.[0]?.message?.content;
 
-            if (aiResponseContent) {
+    if (aiResponseContent) {
+      try {
+        const jsonString = extractJsonFromResponse(aiResponseContent);
+        const parsedResponse = JSON.parse(jsonString);
 
-              try {
+        if (Array.isArray(parsedResponse) && parsedResponse[0]?.flashcardId === 'invalid-input') {
+          const reason = parsedResponse[0]?.name || "The provided content is not a valid academic lesson.";
+          throw new Error(reason);
+        }
 
-                // Attempt to extract JSON from the AI response, as it might be wrapped in markdown or other text
+        const flashcards: { question: string; answer: string }[] = parsedResponse;
 
-                const jsonMatch = aiResponseContent.match(/```json\n([\s\S]*?)\n```/);
-
-                let jsonString = aiResponseContent;
-
-        
-
-                if (jsonMatch && jsonMatch[1]) {
-
-                  jsonString = jsonMatch[1];
-
-                } else {
-
-                  // Fallback to trying to find the first array or object if no markdown block
-
-                  const arrayMatch = aiResponseContent.match(/[\[][\s\S]*?[\]]/);
-
-                  const objectMatch = aiResponseContent.match(/[\[][\s\S]*?[\]]/);
-
-        
-
-                  if (arrayMatch && (!objectMatch || arrayMatch.index < objectMatch.index)) {
-
-                    jsonString = arrayMatch[0];
-
-                  } else if (objectMatch) {
-
-                    jsonString = objectMatch[0];
-
-                  }
-
-                }
-
-                
-
-                const parsedResponse = JSON.parse(jsonString);
-
-        
-
-                if (Array.isArray(parsedResponse) && parsedResponse[0]?.flashcardId === 'invalid-input') {
-
-                  const reason = parsedResponse[0]?.name || "The provided content is not a valid academic lesson.";
-
-                  throw new Error(reason);
-
-                }
-
-        
-
-                const flashcards: { question: string; answer: string }[] = parsedResponse;
-
-                return {
-
-                  flashcards: flashcards.map((card, index) => ({
-
-                    id: `flashcard-${index}`,
-
-                    question: card.question,
-
-                    answer: card.answer,
-
-                  })),
-
-                  warningMessage,
-
-                };
-
-              } catch (parseError) {
-
-                console.error("Failed to parse AI response content as JSON:", aiResponseContent, parseError);
-
-                throw new Error("Failed to parse flashcards: The AI response was not valid JSON. Please try with a different text or contact support if the issue persists.");
-
-              }
-
-            } else {
-
-              throw new Error("No content received from AI for flashcards.");
-
-            }
-
-        
+        return {
+          flashcards: flashcards.map((card, index) => ({
+            id: `flashcard-${index}`,
+            question: card.question,
+            answer: card.answer,
+          })),
+          warningMessage,
+        };
+      } catch (parseError) {
+        console.error("Failed to parse AI response content as JSON:", aiResponseContent, parseError);
+        throw new Error(ERROR_MESSAGES.INVALID_JSON);
+      }
+    } else {
+      throw new Error(ERROR_MESSAGES.NO_CONTENT);
+    }
   } catch (error) {
     console.error("Error generating flashcards:", error);
     throw error; // Re-throw the error to be caught by the calling component
   }
 };
-
-const LOCAL_STORAGE_KEY = 'talacards-flashcards';
 
 export const saveFlashcardsToLocalStorage = (flashcards: Flashcard[]): void => {
   try {

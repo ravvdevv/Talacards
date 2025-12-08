@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import { Input } from '@/components/ui/input';
 import { UploadCloud } from 'lucide-react';
+import { ERROR_MESSAGES, MAX_PDF_SIZE_MB } from '@/lib/constants';
 
 // Set up the worker source for pdfjs-dist
 GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
@@ -49,7 +50,7 @@ const PdfParser: React.FC<PdfParserProps> = ({ setExtractedPdfText, setFlashcard
       setFlashcardText(pdfText);
     } catch (error) {
       console.error('Error processing PDF:', error);
-      setFlashcardText('Error processing PDF. Please try another file.');
+      setFlashcardText(ERROR_MESSAGES.PDF_PROCESSING_ERROR);
       setFileName('');
     }
   };
@@ -72,7 +73,7 @@ const PdfParser: React.FC<PdfParserProps> = ({ setExtractedPdfText, setFlashcard
             {fileName || 'Click to upload PDF'}
           </h3>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {fileName ? 'File selected' : 'PDF (max. 10MB)'}
+            {fileName ? 'File selected' : `PDF (max. ${MAX_PDF_SIZE_MB}MB)`}
           </p>
           <Input
             type="file"
